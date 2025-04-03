@@ -1,0 +1,110 @@
+% Main Script: main_script.m
+% Unsupervised feature selection using Binary Bat Algorithm and k-means clustering
+
+% Set the random seed for reproducibility
+rng(42);
+
+% Load dataset
+load('breastw.mat'); % Adjust the file name as needed
+
+% Perform data transformation and preprocessing
+% Handle missing values by removing rows with missing values
+X = rmmissing(X);
+y = rmmissing(y); % Ensure y is also cleaned if necessary
+
+% Set parameters
+numBats = 15;
+maxIterations = 50;
+pulseRate = 0.1;
+loudness = 0.1;
+crossoverRate = 0.5; % Crossover rate
+k = 5; % Number of clusters for k-means
+kFold = 10; % Number of folds for cross-validation
+
+% Run Binary Bat Algorithm feature selection
+[bestFeatures, bestAccuracy] = binaryBatAlgorithm(X, y, numBats, maxIterations, pulseRate, loudness, crossoverRate, k, kFold);
+
+% Display the number of selected features
+numSelectedFeatures = numel(bestFeatures);
+disp(['Number of Selected Features: ', num2str(numSelectedFeatures)]);
+
+% Perform classification using the selected features and evaluate accuracy
+selectedData = X(:, bestFeatures);
+
+% Initialize classifiers
+classifiers = {'Decision Tree', 'Naïve Bayes', 'k-Nearest Neighbor', 'SVM'};
+numClassifiers = numel(classifiers);
+
+% Initialize metrics arrays
+accuracies = zeros(numClassifiers, kFold);
+precisions = zeros(numClassifiers, kFold);
+recalls = zeros(numClassifiers, kFold);
+f1Scores = zeros(numClassifiers, kFold);
+aucs = zeros(numClassifiers, kFold);
+mccs = zeros(numClassifiers, kFold);
+
+% Perform k-fold cross-validation
+cv = cvpartition(y, 'KFold', kFold);
+
+for fold = 1:kFold
+    trainIdx = training(cv, fold);
+    testIdx = test(cv, fold);
+    
+    % Train and predict with each classifier
+    for i = 1:numClassifiers
+        switch classifiers{i}
+            case 'Decision Tree'
+                model = fitctree(selectedData(trainIdx, :), y(trainIdx));
+            case 'Naïve Bayes'
+                model = fitcnb(selectedData(trainIdx, :), y(trainIdx));
+            case 'k-Nearest Neighbor'
+                model = fitcknn(selectedData(trainIdx, :), y(trainIdx));
+            case 'SVM'
+                model = fitcsvm(selectedData(trainIdx, :), y(trainIdx));
+        end
+        
+        % Predict classes and get scores
+        [predictions, scores] = predict(model, selectedData(testIdx, :));
+        
+        % Ensure scores are in the correct format for AUC calculation
+        if size(scores, 2) == 1
+            scores = [1 - scores, scores]; % Dummy probability for binary classification
+        end
+        
+        % Calculate metrics
+        [accuracies(i, fold), precisions(i, fold), recalls(i, fold), f1Scores(i, fold), aucs(i, fold), mccs(i, fold)] = ...
+            calculateMetrics(y(testIdx), predictions, scores);
+    end
+end
+
+% Calculate mean metrics
+meanAccuracies = mean(accuracies, 2);
+meanPrecisions = mean(precisions, 2);
+meanRecalls = mean(recalls, 2);
+meanF1Scores = mean(f1Scores, 2);
+meanAUCs = mean(aucs, 2);
+meanMCCs = mean(mccs, 2);
+
+% Create a table to display the results
+datasetUsed = 'Breast Cancer Dataset';
+resultsTable = table(classifiers', meanAccuracies, meanPrecisions, meanRecalls, meanF1Scores, meanAUCs, meanMCCs, ...
+    'VariableNames', {'Classifier', 'Accuracy', 'Precision', 'Recall', 'F1Score', 'AUC', 'MCC'});
+disp(['Results for ', datasetUsed]);
+disp(resultsTable);
+
+% Create a bar chart for each metric
+metrics = {'Accuracy', 'Precision', 'Recall', 'F1 Score', 'AUC', 'MCC'};
+metricValues = {meanAccuracies, meanPrecisions, meanRecalls, meanF1Scores, meanAUCs, meanMCCs};
+
+for j = 1:numel(metrics)
+    figure;
+    bar(metricValues{j});
+    xlabel('Classifier');
+    ylabel(metrics{j});
+    title([metrics{j}, ' of Classifiers']);
+    xticks(1:numClassifiers);
+    xticklabels(classifiers);
+    text(1:numClassifiers, metricValues{j}, num2str(metricValues{j}', '%0.2f'), 'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
+    ylim([0, 1.2]);
+    set(gca, 'LooseInset', get(gca, 'TightInset') + [0.02, 0.02, 0.02, 0.02]);
+end
